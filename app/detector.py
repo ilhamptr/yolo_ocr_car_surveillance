@@ -71,18 +71,41 @@ def _get_reader():
             kwargs = {"model_storage_directory": model_dir} if model_dir else {}
             reader = easyocr.Reader(["en"], gpu=False, **kwargs)
         else:
-            from paddleocr import PaddleOCR
-            # PaddleOCR 3.x API. Only text detection + recognition; disable the
-            # document-level stages meant for scanned pages, not plate crops.
-            reader = PaddleOCR(
-                lang="en",
-                use_textline_orientation=True,
-                use_doc_orientation_classify=False,
-                use_doc_unwarping=False,
-            )
+            reader = _build_paddle()
         _reader = reader
 
     return _reader
+
+
+def _paddle_major_version() -> int:
+    """Return PaddleOCR's major version (2 or 3). Defaults to 3 if unknown."""
+    try:
+        import paddleocr
+        return int(str(paddleocr.__version__).split(".")[0])
+    except Exception:
+        return 3
+
+
+def _build_paddle():
+    """Construct a PaddleOCR reader for whichever major version is installed.
+
+    The 2.x and 3.x constructors take different arguments:
+      - 3.x: use_textline_orientation, use_doc_orientation_classify, ...
+      - 2.x: use_angle_cls, show_log
+    Docker pins 2.10.0 (stable on ARM64 Linux); local may run 3.x. This keeps
+    both working without code changes per environment.
+    """
+    from paddleocr import PaddleOCR
+
+    if _paddle_major_version() >= 3:
+        return PaddleOCR(
+            lang="en",
+            use_textline_orientation=True,
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+        )
+    # 2.x API
+    return PaddleOCR(lang="en", use_angle_cls=True, show_log=False)
 
 
 def warm_up():
@@ -213,36 +236,45 @@ def _read_easyocr(reader, crop_bgr):
 
 
 def _read_paddle(reader, crop_bgr):
-    """OCR with PaddleOCR 3.x. Returns (raw_text, mean_score).
+    """OCR with PaddleOCR. Returns (raw_text, mean_score).
 
-    reader.predict() returns a list of OCRResult dicts (one per image). Each
-    result carries parallel lists: rec_texts, rec_scores, rec_boxes. We sort
-    the text fragments by the x of their box, join the text, and average the
-    recognition scores.
+    Handles both major versions, which return different structures:
+      - 3.x: reader.predict() -> [OCRResult dict] with rec_texts/rec_scores/rec_boxes
+      - 2.x: reader.ocr(img, cls=True) -> [[ [box, (text, score)], ... ]]
+    Fragments are sorted left-to-right; scores are averaged.
     """
+    if _paddle_major_version() >= 3:
+        with _infer_lock:
+            result = reader.predict(crop_bgr)
+        if not result:
+            return "", 0.0
+        res = result[0]
+        texts = list(res.get("rec_texts") or [])
+        scores = list(res.get("rec_scores") or [])
+        boxes = res.get("rec_boxes")
+        boxes = list(boxes) if boxes is not None else []
+        if not texts:
+            return "", 0.0
+        if len(boxes) == len(texts) and len(texts) > 1:
+            order = sorted(range(len(texts)), key=lambda i: boxes[i][0])
+            texts = [texts[i] for i in order]
+            if len(scores) == len(order):
+                scores = [scores[i] for i in order]
+        mean_score = sum(float(s) for s in scores) / len(scores) if scores else 0.0
+        return "".join(texts), mean_score
+
+    # --- 2.x path ---
     with _infer_lock:
-        result = reader.predict(crop_bgr)
-    if not result:
+        result = reader.ocr(crop_bgr, cls=True)
+    # result: [ [ [box_points, (text, score)], ... ] ]  (None/empty if nothing)
+    if not result or not result[0]:
         return "", 0.0
-
-    res = result[0]
-    texts = res.get("rec_texts") or []
-    scores = res.get("rec_scores") or []
-    boxes = res.get("rec_boxes")
-    if boxes is None:
-        boxes = []
-
-    if not texts:
-        return "", 0.0
-
-    if len(boxes) == len(texts) and len(texts) > 1:
-        # Sort fragments left-to-right by the box's left edge (x min).
-        order = sorted(range(len(texts)), key=lambda i: boxes[i][0])
-        texts = [texts[i] for i in order]
-        if len(scores) == len(order):
-            scores = [scores[i] for i in order]
-
-    mean_score = sum(float(s) for s in scores) / len(scores) if scores else 0.0
+    lines = result[0]
+    # Each line: [ [[x,y],...4 pts], (text, score) ]; sort by left x.
+    lines.sort(key=lambda ln: ln[0][0][0])
+    texts = [ln[1][0] for ln in lines]
+    scores = [float(ln[1][1]) for ln in lines]
+    mean_score = sum(scores) / len(scores) if scores else 0.0
     return "".join(texts), mean_score
 
 

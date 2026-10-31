@@ -1,8 +1,11 @@
 ultralytics
 # OCR engines. PaddleOCR is the default (more accurate on hard characters);
 # easyocr is kept as a fallback (set OCR_ENGINE=easyocr).
-paddleocr
-paddlepaddle
+# Pinned to 2.10.0: PaddleOCR 3.x segfaults on ARM64 Linux (Docker on Apple
+# Silicon). 2.10.0 is the last stable release there. The code supports both
+# the 2.x and 3.x APIs, so a local 3.x install keeps working too.
+paddleocr==2.10.0
+paddlepaddle==2.6.2
 easyocr
 fastapi
 uvicorn[standard]
