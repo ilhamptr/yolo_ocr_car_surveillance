@@ -1,0 +1,13 @@
+ultralytics
+# OCR engines. PaddleOCR is the default (more accurate on hard characters);
+# easyocr is kept as a fallback (set OCR_ENGINE=easyocr).
+paddleocr
+paddlepaddle
+easyocr
+fastapi
+uvicorn[standard]
+streamlit
+python-multipart
+requests
+opencv-python
+numpy

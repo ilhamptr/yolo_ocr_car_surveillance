@@ -1,0 +1,25 @@
+# Local data and artifacts not needed in the image (datasets, venv, etc.)
+misc/
+
+# Dev-only tooling (evaluation scripts, notebooks, training)
+tooling/
+
+# Python caches / virtualenvs
+__pycache__/
+*.pyc
+env/
+venv/
+.venv/
+
+# Local runtime data (recreated inside the container volume)
+parking.db
+runs/
+
+# CCTV videos are mounted at runtime via docker-compose, not baked in
+videos/
+
+# Dev / VCS / OS
+.git/
+.gitignore
+.DS_Store
+README.md

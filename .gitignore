@@ -1,0 +1,22 @@
+# Local data and artifacts not pushed to the repo
+misc/
+
+# Python
+__pycache__/
+*.pyc
+env/
+venv/
+.venv/
+
+# Runtime data
+parking.db
+runs/
+
+# CCTV sample videos (large; mounted at runtime, not part of the repo)
+videos/
+
+# Annotated evaluation output
+annotated/
+
+# OS cruft
+.DS_Store

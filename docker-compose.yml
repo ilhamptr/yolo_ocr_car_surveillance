@@ -1,0 +1,55 @@
+services:
+  # FastAPI backend: a background scheduler reads each sector's CCTV video,
+  # runs YOLO + EasyOCR, and keeps the DB as a live parking snapshot.
+  api:
+    build: .
+    command: uvicorn app.api:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    environment:
+      # SQLite DB lives on the shared data volume.
+      DB_PATH: /data/parking.db
+      # Cache EasyOCR models so they download only once.
+      EASYOCR_MODULE_PATH: /data/easyocr
+      # Folder of CCTV videos (one subfolder per sector), mounted below.
+      VIDEOS_DIR: /videos
+      DETECT_CONF: 0.25
+      # OCR engine: "paddle" (default, more accurate) or "easyocr".
+      OCR_ENGINE: paddle
+      # Fix look-alike characters using Indonesian plate structure (1=on).
+      PLATE_CORRECTION: 1
+      # Drop OCR readings below this text-confidence (0-1). 0 = keep all.
+      MIN_OCR_SCORE: 0.65
+      # --- crop / OCR preprocessing (see app/detector.py) ---
+      CROP_PADDING: 0.15      # expand box by 15% so plate isn't cut off
+      MIN_CROP_HEIGHT: 64     # upscale small crops to this height before OCR
+      # --- motion gate (see app/cctv.py) ---
+      FRAME_SKIP: 5           # check motion every Kth frame (cheap)
+      MOTION_THRESHOLD: 0.02  # fraction of frame moving to trigger YOLO
+      BURST_FRAMES: 12            # max frames to read per motion event
+      BURST_MISS_LIMIT: 5         # stop burst after N consecutive no-plate frames
+      MOTION_COOLDOWN_FRAMES: 15  # frames to skip after a burst (not wall-clock)
+      # Remove a plate only after it hasn't been seen for this many hours.
+      EXPIRY_HOURS: 24
+      EXPIRY_CHECK_SECONDS: 600
+    volumes:
+      - app_data:/data
+      # Mount your local CCTV videos read-only. Layout: ./videos/A1/cam.mp4 etc.
+      - ./videos:/videos:ro
+    restart: unless-stopped
+
+  # Streamlit UI: users search for their plate. Talks to the API by service name.
+  ui:
+    build: .
+    command: streamlit run app/ui.py --server.address 0.0.0.0 --server.port 8501
+    ports:
+      - "8501:8501"
+    environment:
+      API_URL: http://api:8000
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  # Persists the SQLite DB and the EasyOCR model cache.
+  app_data:

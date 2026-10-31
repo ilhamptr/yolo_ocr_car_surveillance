@@ -1,0 +1,6 @@
+[browser]
+# Skip the onboarding email prompt and usage stats on first run.
+gatherUsageStats = false
+
+[server]
+headless = true
